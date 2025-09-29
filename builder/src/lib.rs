@@ -33,42 +33,41 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                 let ident = ident.as_ref().ok_or("No Ident").unwrap();
                 let ty = match ty {
-                    Type::Path(path) => {
-                        path.path
-                            .segments
-                            .last()
-                            .and_then(|last| {
-                                if last.ident.to_string() == "Option" {
-                                    match &last.arguments {
-                                        PathArguments::AngleBracketed(inner) => {
-                                            inner.args.first().and_then(|arg| match arg {
-                                                GenericArgument::Type(ty) => Some(ty),
-                                                _ => None,
-                                            })
-                                        }
-                                        _ => None,
+                    Type::Path(path) => path
+                        .path
+                        .segments
+                        .last()
+                        .and_then(|last| {
+                            if last.ident.to_string() == "Option" {
+                                match &last.arguments {
+                                    PathArguments::AngleBracketed(inner) => {
+                                        inner.args.first().and_then(|arg| match arg {
+                                            GenericArgument::Type(ty) => Some(ty),
+                                            _ => None,
+                                        })
                                     }
-                                } else {
-                                    None
+                                    _ => None,
                                 }
-                            })
-                            .map_or_else(
-                                || {
-                                    build_fields.push(BuilderField {
-                                        ident: ident.clone(),
-                                        ty: ty.clone(),
-                                    });
-                                    ty
-                                },
-                                |ty| {
-                                    raw_fields.push(BuilderField {
-                                        ident: ident.clone(),
-                                        ty: ty.clone(),
-                                    });
-                                    ty
-                                },
-                            )
-                    }
+                            } else {
+                                None
+                            }
+                        })
+                        .map_or_else(
+                            || {
+                                build_fields.push(BuilderField {
+                                    ident: ident.clone(),
+                                    ty: ty.clone(),
+                                });
+                                ty
+                            },
+                            |ty| {
+                                raw_fields.push(BuilderField {
+                                    ident: ident.clone(),
+                                    ty: ty.clone(),
+                                });
+                                ty
+                            },
+                        ),
                     _ => {
                         build_fields.push(BuilderField {
                             ident: ident.clone(),
