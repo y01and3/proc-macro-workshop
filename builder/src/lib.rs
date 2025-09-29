@@ -40,20 +40,40 @@ pub fn derive(input: TokenStream) -> TokenStream {
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
 
-        let expanded = quote! {
-                #(#attrs)*
-                #vis struct #new_ident #generics {
-                    #(#fields)*
-                }
+        let setters = data
+            .fields
+            .iter()
+            .map(|field| {
+                let ident = &field.ident;
+                let ty = &field.ty;
 
-                impl #ident {
-                    pub fn builder() -> #new_ident {
-                        #new_ident {
-                            #(#data_fields)*
-                        }
+                return quote! {
+                    fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                        self.#ident = Some(#ident);
+                        self
+                    }
+                };
+            })
+            .collect::<Vec<proc_macro2::TokenStream>>();
+
+        let expanded = quote! {
+            #(#attrs)*
+            #vis struct #new_ident #generics {
+                #(#fields)*
+            }
+
+            impl #ident {
+                pub fn builder() -> #new_ident {
+                    #new_ident {
+                        #(#data_fields)*
                     }
                 }
-            };
+            }
+
+            impl #new_ident {
+                #(#setters)*
+            }
+        };
 
         TokenStream::from(expanded)
     } else {
