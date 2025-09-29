@@ -1,6 +1,5 @@
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, Span};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput};
 
 #[proc_macro_derive(Builder)]
@@ -9,7 +8,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let attrs = input.attrs;
     let vis = input.vis;
     let ident = input.ident;
-    let new_ident = Ident::new(&format!("{}Builder", ident), Span::call_site());
+    let new_ident = format_ident!("{}Builder", ident);
     let generics = input.generics;
     if let Data::Struct(data) = input.data {
         let fields = data
