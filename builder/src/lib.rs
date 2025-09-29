@@ -56,6 +56,31 @@ pub fn derive(input: TokenStream) -> TokenStream {
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
 
+        let check_fields = data
+            .fields
+            .iter()
+            .map(|field| {
+                let ident = &field.ident;
+                let ty = &field.ty;
+
+                return quote! {
+                    let #ident: #ty = self.#ident.as_ref().ok_or("Unexpected Null")?.clone();
+                };
+            })
+            .collect::<Vec<proc_macro2::TokenStream>>();
+
+        let checked_fields = data
+            .fields
+            .iter()
+            .map(|field| {
+                let ident = &field.ident;
+
+                return quote! {
+                    #ident,
+                };
+            })
+            .collect::<Vec<proc_macro2::TokenStream>>();
+
         let expanded = quote! {
             #(#attrs)*
             #vis struct #new_ident #generics {
@@ -72,6 +97,14 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
             impl #new_ident {
                 #(#setters)*
+
+                pub fn build(&mut self) -> Result<#ident, String> {
+                    #(#check_fields)*
+
+                    Ok(#ident {
+                        #(#checked_fields)*
+                    })
+                }
             }
         };
 
