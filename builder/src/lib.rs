@@ -1,6 +1,13 @@
 use proc_macro::TokenStream;
+use proc_macro2::Ident;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput};
+use syn::{parse_macro_input, Data, DeriveInput, GenericArgument, PathArguments, Type};
+
+#[derive(Clone)]
+struct BuilderField {
+    ident: Ident,
+    ty: Type,
+}
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -10,8 +17,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let ident = input.ident;
     let new_ident = format_ident!("{}Builder", ident);
     let generics = input.generics;
+
     if let Data::Struct(data) = input.data {
-        let fields = data
+        let mut build_fields: Vec<BuilderField> = vec![];
+        let mut raw_fields: Vec<BuilderField> = vec![];
+
+        let struct_fields = data
             .fields
             .iter()
             .map(|field| {
@@ -20,70 +31,123 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 let ident = &field.ident;
                 let ty = &field.ty;
 
-                return quote! {
+                let ident = ident.as_ref().ok_or("No Ident").unwrap();
+                let ty = match ty {
+                    Type::Path(path) => {
+                        path.path
+                            .segments
+                            .last()
+                            .and_then(|last| {
+                                if last.ident.to_string() == "Option" {
+                                    match &last.arguments {
+                                        PathArguments::AngleBracketed(inner) => {
+                                            inner.args.first().and_then(|arg| match arg {
+                                                GenericArgument::Type(ty) => Some(ty),
+                                                _ => None,
+                                            })
+                                        }
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                            .map_or_else(
+                                || {
+                                    build_fields.push(BuilderField {
+                                        ident: ident.clone(),
+                                        ty: ty.clone(),
+                                    });
+                                    ty
+                                },
+                                |ty| {
+                                    raw_fields.push(BuilderField {
+                                        ident: ident.clone(),
+                                        ty: ty.clone(),
+                                    });
+                                    ty
+                                },
+                            )
+                    }
+                    _ => {
+                        build_fields.push(BuilderField {
+                            ident: ident.clone(),
+                            ty: ty.clone(),
+                        });
+                        ty
+                    }
+                };
+
+                quote! {
                     #(#attrs)*
                     #vis #ident: Option<#ty>,
-                };
+                }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
 
-        let data_fields = data
-            .fields
-            .iter()
+        let data_fields = build_fields
+            .clone()
+            .into_iter()
+            .chain(raw_fields.clone().into_iter())
             .map(|field| {
                 let ident = &field.ident;
+                quote! {#ident: None,}
+            });
 
-                return quote! {
-                    #ident: None,
-                };
-            })
-            .collect::<Vec<proc_macro2::TokenStream>>();
-
-        let setters = data
-            .fields
-            .iter()
+        let setters = build_fields
+            .clone()
+            .into_iter()
+            .chain(raw_fields.clone().into_iter())
             .map(|field| {
                 let ident = &field.ident;
                 let ty = &field.ty;
 
-                return quote! {
+                quote! {
                     fn #ident(&mut self, #ident: #ty) -> &mut Self {
                         self.#ident = Some(#ident);
                         self
                     }
-                };
+                }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
 
-        let check_fields = data
-            .fields
-            .iter()
+        let check_fields = build_fields
+            .clone()
+            .into_iter()
             .map(|field| {
                 let ident = &field.ident;
                 let ty = &field.ty;
 
-                return quote! {
+                quote! {
                     let #ident: #ty = self.#ident.as_ref().ok_or("Unexpected Null")?.clone();
-                };
+                }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
 
-        let checked_fields = data
-            .fields
-            .iter()
+        let checked_fields = build_fields
+            .clone()
+            .into_iter()
             .map(|field| {
                 let ident = &field.ident;
 
-                return quote! {
+                quote! {
                     #ident,
-                };
+                }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
+
+        let unchanged_fields = raw_fields.clone().into_iter().map(|field| {
+            let ident = &field.ident;
+
+            quote! {
+                #ident: self.#ident.clone(),
+            }
+        });
 
         let expanded = quote! {
             #(#attrs)*
             #vis struct #new_ident #generics {
-                #(#fields)*
+                #(#struct_fields)*
             }
 
             impl #ident {
@@ -102,6 +166,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                     Ok(#ident {
                         #(#checked_fields)*
+                        #(#unchanged_fields)*
                     })
                 }
             }
