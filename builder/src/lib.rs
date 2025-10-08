@@ -9,7 +9,7 @@ struct BuilderField {
     ty: Type,
 }
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let attrs = input.attrs;
@@ -31,7 +31,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 let ident = &field.ident;
                 let ty = &field.ty;
 
-                let ident = ident.as_ref().ok_or("No Ident").unwrap();
+                let ident = ident.as_ref().ok_or("Field no Ident").unwrap();
                 let ty = match ty {
                     Type::Path(path) => path
                         .path
@@ -118,7 +118,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 let ty = &field.ty;
 
                 quote! {
-                    let #ident: #ty = self.#ident.as_ref().ok_or("Unexpected Null")?.clone();
+                    let #ident: #ty = self.#ident.as_ref().ok_or("Unexpected None")?.clone();
                 }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
