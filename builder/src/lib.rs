@@ -4,8 +4,8 @@ use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Expr, GenericArgument, Lit, PathArguments,
-    Type,
+    parse_macro_input, spanned::Spanned, Attribute, Data, DeriveInput, Error, Expr,
+    GenericArgument, Lit, PathArguments, Type,
 };
 
 #[derive(Clone)]
@@ -27,6 +27,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         let mut build_fields: Vec<BuilderField> = vec![];
         let mut raw_fields: Vec<BuilderField> = vec![];
         let mut each_builder = HashMap::<Ident, Ident>::new(); // key is field name, value is function name
+        let mut err: Option<Error> = None;
 
         let struct_fields = data
             .fields
@@ -83,34 +84,62 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     }
                 };
 
-                if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("builder")) {
-                    let builder: Expr = attr.parse_args().unwrap();
-                    match builder {
-                        Expr::Assign(assign) => {
-                            let left = assign.left.as_ref();
-                            let right = assign.right.as_ref();
-                            match (left, right) {
-                                (Expr::Path(left), Expr::Lit(right)) => {
-                                    if left.path.is_ident("each") {
-                                        match &right.lit {
-                                            Lit::Str(name) => {
-                                                each_builder.insert(
-                                                    ident.clone(),
-                                                    format_ident!("{}", name.value()),
-                                                );
+                let new_err =
+                    if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("builder")) {
+                        let builder: Expr = attr.parse_args().unwrap();
+                        match builder {
+                            Expr::Assign(assign) => {
+                                let left = assign.left.as_ref();
+                                let right = assign.right.as_ref();
+                                match (left, right) {
+                                    (Expr::Path(left), Expr::Lit(right)) => {
+                                        if left.path.is_ident("each") {
+                                            match &right.lit {
+                                                Lit::Str(name) => {
+                                                    each_builder.insert(
+                                                        ident.clone(),
+                                                        format_ident!("{}", name.value()),
+                                                    );
+                                                    None
+                                                }
+                                                _ => Some(Error::new(
+                                                    attr.meta.span(),
+                                                    "expected `builder(each = \"...\")`",
+                                                )),
                                             }
-                                            _ => panic!("Expected `builder(each = \"...\")`"),
+                                        } else {
+                                            Some(Error::new(
+                                                attr.meta.span(),
+                                                "expected `builder(each = \"...\")`",
+                                            ))
                                         }
-                                    } else {
-                                        panic!("Expected `builder(each = \"...\")`");
                                     }
+                                    _ => Some(Error::new(
+                                        attr.meta.span(),
+                                        "expected `builder(each = \"...\")`",
+                                    )),
                                 }
-                                _ => panic!("Expected `builder(each = \"...\")`"),
                             }
+                            _ => Some(Error::new(
+                                attr.meta.span(),
+                                "expected `builder(each = \"...\")`",
+                            )),
                         }
-                        _ => panic!("Expected `builder(each = \"...\")`"),
-                    }
+                    } else {
+                        None
+                    };
+
+                if let Some(new_err) = new_err {
+                    err = Some(match &err {
+                        Some(e) => {
+                            let mut e = e.clone();
+                            e.combine(new_err);
+                            e
+                        }
+                        None => new_err,
+                    })
                 }
+
                 let attrs = attrs
                     .iter()
                     .filter(|attr| !attr.path().is_ident("builder"))
@@ -122,6 +151,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
+
+        if let Some(err) = err {
+            return TokenStream::from(err.into_compile_error());
+        }
 
         let data_fields = build_fields
             .clone()
