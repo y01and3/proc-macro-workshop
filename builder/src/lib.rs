@@ -147,7 +147,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                 quote! {
                     #(#attrs)*
-                    #vis #ident: Option<#ty>,
+                    #vis #ident: core::option::Option<#ty>,
                 }
             })
             .collect::<Vec<proc_macro2::TokenStream>>();
@@ -167,9 +167,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     .find(|ident| **ident == field.ident)
                     .is_some()
                 {
-                    quote! {#ident: Some(vec![]),}
+                    quote! {#ident: core::option::Option::Some(vec![]),}
                 } else {
-                    quote! {#ident: None,}
+                    quote! {#ident: core::option::Option::None,}
                 }
             });
 
@@ -189,7 +189,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                 quote! {
                     pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
-                        self.#ident = Some(#ident);
+                        self.#ident = core::option::Option::Some(#ident);
                         self
                     }
                 }
@@ -239,8 +239,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 quote! {
                     pub fn #func(&mut self, #func: #ty) -> &mut Self{
                         match &mut self.#ident {
-                            Some(vec) => vec.push(#func),
-                            None=> self.#ident = Some(vec![#func]),
+                            core::option::Option::Some(vec) => vec.push(#func),
+                            core::option::Option::None=> self.#ident = core::option::Option::Some(vec![#func]),
                         };
                         self
                     }
@@ -300,10 +300,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                 #(#each_setters)*
 
-                pub fn build(&mut self) -> Result<#ident, String> {
+                pub fn build(&mut self) -> std::result::Result<#ident, String> {
                     #(#check_fields)*
 
-                    Ok(#ident {
+                    std::result::Result::Ok(#ident {
                         #(#checked_fields)*
                         #(#unchanged_fields)*
                     })
