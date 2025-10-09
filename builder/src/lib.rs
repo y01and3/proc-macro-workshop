@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, GenericArgument, PathArguments, Type};
+use syn::{
+    parse_macro_input, Attribute, Data, DeriveInput, Expr, GenericArgument, Lit, PathArguments,
+    Type,
+};
 
 #[derive(Clone)]
 struct BuilderField {
@@ -21,6 +26,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     if let Data::Struct(data) = input.data {
         let mut build_fields: Vec<BuilderField> = vec![];
         let mut raw_fields: Vec<BuilderField> = vec![];
+        let mut each_builder = HashMap::<Ident, Ident>::new(); // key is field name, value is function name
 
         let struct_fields = data
             .fields
@@ -77,6 +83,39 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     }
                 };
 
+                if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("builder")) {
+                    let builder: Expr = attr.parse_args().unwrap();
+                    match builder {
+                        Expr::Assign(assign) => {
+                            let left = assign.left.as_ref();
+                            let right = assign.right.as_ref();
+                            match (left, right) {
+                                (Expr::Path(left), Expr::Lit(right)) => {
+                                    if left.path.is_ident("each") {
+                                        match &right.lit {
+                                            Lit::Str(name) => {
+                                                each_builder.insert(
+                                                    ident.clone(),
+                                                    format_ident!("{}", name.value()),
+                                                );
+                                            }
+                                            _ => panic!("Expected `builder(each = \"...\")`"),
+                                        }
+                                    } else {
+                                        panic!("Expected `builder(each = \"...\")`");
+                                    }
+                                }
+                                _ => panic!("Expected `builder(each = \"...\")`"),
+                            }
+                        }
+                        _ => panic!("Expected `builder(each = \"...\")`"),
+                    }
+                }
+                let attrs = attrs
+                    .iter()
+                    .filter(|attr| !attr.path().is_ident("builder"))
+                    .collect::<Vec<&Attribute>>();
+
                 quote! {
                     #(#attrs)*
                     #vis #ident: Option<#ty>,
@@ -90,20 +129,86 @@ pub fn derive(input: TokenStream) -> TokenStream {
             .chain(raw_fields.clone().into_iter())
             .map(|field| {
                 let ident = &field.ident;
-                quote! {#ident: None,}
+                if each_builder
+                    .keys()
+                    .find(|ident| **ident == field.ident)
+                    .is_some()
+                {
+                    quote! {#ident: Some(vec![]),}
+                } else {
+                    quote! {#ident: None,}
+                }
             });
 
         let setters = build_fields
             .clone()
             .into_iter()
             .chain(raw_fields.clone().into_iter())
+            .filter(|field| {
+                each_builder
+                    .keys()
+                    .find(|ident| **ident == field.ident)
+                    .is_none()
+            })
             .map(|field| {
                 let ident = &field.ident;
                 let ty = &field.ty;
 
                 quote! {
-                    fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
                         self.#ident = Some(#ident);
+                        self
+                    }
+                }
+            })
+            .collect::<Vec<proc_macro2::TokenStream>>();
+
+        let each_setters = build_fields
+            .clone()
+            .into_iter()
+            .chain(raw_fields.clone().into_iter())
+            .filter(|field| {
+                each_builder
+                    .keys()
+                    .find(|ident| **ident == field.ident)
+                    .is_some()
+            })
+            .map(|field| {
+                let ident = &field.ident;
+                let func = each_builder.get(ident).ok_or("Not find Ident").unwrap();
+                let ty = &field.ty;
+
+                let ty = match ty {
+                    Type::Path(path) => path
+                        .path
+                        .segments
+                        .last()
+                        .and_then(|last| {
+                            if last.ident.to_string() == "Vec" {
+                                match &last.arguments {
+                                    PathArguments::AngleBracketed(inner) => {
+                                        inner.args.first().and_then(|arg| match arg {
+                                            GenericArgument::Type(ty) => Some(ty),
+                                            _ => None,
+                                        })
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or("Expected Vec")
+                        .unwrap(),
+                    _ => panic!("Expected Vec"),
+                };
+
+                quote! {
+                    pub fn #func(&mut self, #func: #ty) -> &mut Self{
+                        match &mut self.#ident {
+                            Some(vec) => vec.push(#func),
+                            None=> self.#ident = Some(vec![#func]),
+                        };
                         self
                     }
                 }
@@ -159,6 +264,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
             impl #new_ident {
                 #(#setters)*
+
+                #(#each_setters)*
 
                 pub fn build(&mut self) -> Result<#ident, String> {
                     #(#check_fields)*
