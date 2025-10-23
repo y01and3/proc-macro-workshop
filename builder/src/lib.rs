@@ -52,7 +52,17 @@ pub fn derive(input: TokenStream) -> TokenStream {
             let ident = &field.ident;
             let ty = &field.ty;
 
-            let ident = ident.as_ref().ok_or("Field no Ident").unwrap();
+            let ident = match ident.as_ref() {
+                Some(ident) => ident,
+                None => {
+                    match &mut err {
+                        Some(err) => err.combine(Error::new(field.span(), "No Ident")),
+                        None => err = Some(Error::new(field.span(), "No Ident")),
+                    };
+                    return quote! {};
+                }
+            };
+            
             let ty = match ty {
                 Type::Path(path) => path
                     .path
@@ -275,7 +285,7 @@ fn get_builder_attr(
     attrs: &Vec<Attribute>,
 ) -> Result<Option<(Ident, Ident)>, Error> {
     if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("builder")) {
-        let builder: Expr = attr.parse_args().unwrap();
+        let builder: Expr = attr.parse_args()?;
         match builder {
             Expr::Assign(assign) => {
                 let left = assign.left.as_ref();
